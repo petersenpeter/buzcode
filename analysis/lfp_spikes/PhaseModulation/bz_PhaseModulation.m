@@ -39,6 +39,7 @@
 %                    phasestats.mode     distribution mode
 %                    phasestats.k        concentration
 %                    phasestats.p        p-value for Rayleigh test
+%                    phasestats.r        mean resultant length
 %
 % 
 % Calculates distribution of spikes over various phases from a specified
@@ -74,11 +75,10 @@ numBins = p.Results.numBins;
 powerThresh = p.Results.powerThresh;
 saveMat = p.Results.saveMat;
 
-
 %% Get phase for every time point in LFP
 switch lower(method)
     case ('hilbert')
-        [b a] = butter(4,[passband(1)/(samplingRate/2) passband(2)/(samplingRate/2)],'bandpass');
+        [b a] = butter(3,[passband(1)/(samplingRate/2) passband(2)/(samplingRate/2)],'bandpass'); % order 3
 %         [b a] = cheby2(4,20,passband/(samplingRate/2));
         filt = FiltFiltM(b,a,double(lfp.data(:,1)));
         power = fastrms(filt,ceil(samplingRate./passband(1)));  % approximate power is frequency band
@@ -157,6 +157,7 @@ for a = 1:length(spikes.times)
         spkphases{a} = lfpphase(ceil(s*samplingRate));
 
 %         cum_spkphases = vertcat(cum_spkphases, spkphases{a});
+
 
     %% Gather binned counts and stats (incl Rayleigh Test)
         [phasedistros(:,a),phasebins,ps]=CircularDistribution(spkphases{a},'nBins',numBins);

@@ -24,6 +24,12 @@ function filtered = bz_Filter(samples,varargin)
 %                   automatically from samples.samplingRate for BUZCODE
 %     'FMAlegacy'   true/false, uses FMA legacy input style
 %                   (samples given as a list of (t,v1,v2,v3...) tuples)
+%     'fast'        true/false, uses FiltFiltM if true (doesn't work w/ new
+%                   version of matlab)
+%     'channels'    if input is a buzcode lfp structure with field
+%                   samples.channels, will only filter the selected
+%                   channels
+%     'intervals'   only filter in given intervals (only works for buzcode input)
 %    =========================================================================
 %
 %OUTPUT
@@ -56,7 +62,9 @@ nyquist = 625; %written over later from samples.samplingRate if available
 type = 'cheby2';
 FMAlegacy = false;
 BUZCODE = false;
-matlabVersion = version('-release');
+fast = false;
+channels = [];
+intervals = [-Inf Inf];
 
 % Check number of parameters
 if nargin < 1 | mod(length(varargin),2) ~= 0,
@@ -113,12 +121,22 @@ for i = 1:2:length(varargin),
 			if ~isiscalar(nyquist,'>0'),
 				error('Incorrect value for property ''nyquist'' (type ''help <a href="matlab:help Filter">Filter</a>'' for details).');
             end
-            
+        case 'fast'
+            fast = varargin{i+1};
+            if ~islogical(fast)
+                error('Incorrect value for property ''FMALegacy''');
+            end    
         case 'fmalegacy'
             FMAlegacy = varargin{i+1};
             if ~islogical(FMAlegacy)
                 error('Incorrect value for property ''FMALegacy''');
             end
+            
+        case 'channels'
+            channels = varargin{i+1};
+            
+        case 'intervals'
+            intervals = varargin{i+1};
 
 		otherwise,
 			error(['Unknown property ''' num2str(varargin{i}) ''' (type ''help <a href="matlab:help Filter">Filter</a>'' for details).']);
@@ -138,8 +156,14 @@ if isstruct(samples)
     end
     if ~isfield(samples,'timestamps')
         warning('Your input structure has no .timestamps field, one will be provided for you')
+        samples.timestamps = [0:length(samples.data)-1]./samples.samplingRate;
     end
-    nyquist = 0.5.*samples.samplingRate;
+    
+    if length(samples.samplingRate) > 1 
+       nyquist = 0.5.*samples.samplingRate(1); 
+    else
+       nyquist = 0.5.*samples.samplingRate;
+    end
 end
 
 if isempty(passband) && isempty(stopband),
@@ -190,31 +214,56 @@ end
 if FMAlegacy %FMA has (samples given as a list of (t,v1,v2,v3...) tuples)
     filtered(:,1) = samples(:,1);
     for i = 2:size(samples,2),
-        if strcmp(matlabVersion,'2017a')
+        if ~fast
             filtered(:,i) = filtfilt(b,a,double(samples(:,i)));
         else
             filtered(:,i) = FiltFiltM(b,a,double(samples(:,i)));
         end
     end
+    
 elseif BUZCODE %BUZCODE has samples as a data structure
-    filtered.timestamps = samples.timestamps;
+
+    %Restrict to intervals, with overhang to remove edge effects at transitions
+    %(then remove later)
+    overhang = (order)./passband(1);
+    overint = bsxfun(@(X,Y) X+Y,intervals,overhang.*[-1 1]);
+    keepIDX = InIntervals(samples.timestamps,overint);
+    samples.data = samples.data(keepIDX,:);
+    filtered.timestamps = samples.timestamps(keepIDX);
+    
+    
+    if ~isempty(channels)
+        [~,usechannels] = ismember(channels,samples.channels);
+        samples.data = samples.data(:,usechannels);
+        filtered.channels = samples.channels(usechannels);
+    end
     for i = 1:size(samples.data,2),
-        if strcmp(matlabVersion,'2017a')
+        if ~fast
            filtered.data(:,i) = filtfilt(b,a,double(samples.data(:,i)));
         else
            filtered.data(:,i) = FiltFiltM(b,a,double(samples.data(:,i))); 
         end
 	hilb = hilbert(filtered.data(:,i));
+        filtered.hilb(:,i) = hilb;
         filtered.amp(:,i) = abs(hilb);
         filtered.phase(:,i) = angle(hilb);
     end
+    
+    %Remove the overhang from intervals
+    keepIDX = InIntervals(filtered.timestamps,intervals);
+    filtered.data = filtered.data(keepIDX,:);
+    filtered.hilb = filtered.hilb(keepIDX,:);
+    filtered.amp = filtered.amp(keepIDX,:);
+    filtered.phase = filtered.phase(keepIDX,:);
+    filtered.timestamps = filtered.timestamps(keepIDX);
+    
     filtered.filterparms.passband = passband;
     filtered.filterparms.stopband = stopband;
     filtered.filterparms.order = order;
     filtered.samplingRate = samples.samplingRate;
 else %or if you just want filter a basic timeseries
     for i = 1:size(samples,2),
-        if strcmp(matlabVersion,'2017a')
+        if ~fast
             filtered(:,i) = filtfilt(b,a,double(samples(:,i)));
         else
             filtered(:,i) = FiltFiltM(b,a,double(samples(:,i)));    

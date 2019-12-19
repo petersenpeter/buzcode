@@ -30,7 +30,9 @@ function [ripples] = bz_FindRipples(varargin)
 %     'thresholds'  thresholds for ripple beginning/end and peak, in multiples
 %                   of the stdev (default = [2 5]); must be integer values
 %     'durations'   min inter-ripple interval and max ripple duration, in ms
-%                   (default = [30 100])
+%                   (default = [30 100]). 
+%     'minDuration' min ripple duration. Keeping this input nomenclature for backwards
+%                   compatibility
 %     'restrict'    interval used to compute normalization (default = all)
 %     'frequency'   sampling rate (in Hz) (default = 1250Hz)
 %     'stdev'       reuse previously computed stdev
@@ -38,9 +40,11 @@ function [ripples] = bz_FindRipples(varargin)
 %     'noise'       noisy unfiltered channel used to exclude ripple-
 %                   like noise (events also present on this channel are
 %                   discarded)
-%     'passband'    N x 2 matrix of frequencies to filter for ripple detection
+%     'passband'    N x 2 matrix of frequencies to filter for ripple detection 
+%                   (default = [130 200])
 %     'EMGThresh'   0-1 threshold of EMG to exclude noise
-%     'saveMat'     logical (default=true) to save in buzcode format
+%     'saveMat'     logical (default=false) to save in buzcode format
+%     'plotType'   1=original version (several plots); 2=only raw lfp
 %    =========================================================================
 %
 % OUTPUT
@@ -72,7 +76,7 @@ function [ripples] = bz_FindRipples(varargin)
 
 % Default values
 p = inputParser;
-addParameter(p,'thresholds',[2 5],@isivector)
+addParameter(p,'thresholds',[2 5],@isnumeric)
 addParameter(p,'durations',[30 100],@isnumeric)
 addParameter(p,'restrict',[],@isnumeric)
 addParameter(p,'frequency',1250,@isnumeric)
@@ -81,7 +85,10 @@ addParameter(p,'show','off',@isstr)
 addParameter(p,'noise',[],@ismatrix)
 addParameter(p,'passband',[130 200],@isnumeric)
 addParameter(p,'EMGThresh',.9,@isnumeric);
-addParameter(p,'saveMat',true,@islogical);
+
+addParameter(p,'saveMat',false,@islogical);
+addParameter(p,'minDuration',20,@isnumeric)
+addParameter(p,'plotType',2,@isnumeric)
 addParameter(p,'lfpExtension','.lfp',@isstr);
 
 if isstr(varargin{1})  % if first arg is basepath
@@ -101,6 +108,10 @@ if isstr(varargin{1})  % if first arg is basepath
     p.Results.channel;
     lfp = bz_GetLFP(p.Results.channel,'basepath',p.Results.basepath,'basename',basename,'lfpExtension',lfpExtension);%currently cannot take path inputs
     passband = p.Results.passband;
+
+    EMGThresh = p.Results.EMGThresh;
+    lfp = bz_GetLFP(p.Results.channel,'basepath',p.Results.basepath,'basename',basename);%currently cannot take path inputs
+
     signal = bz_Filter(double(lfp.data),'filter','butter','passband',passband,'order', 3);
     timestamps = lfp.timestamps;
 elseif isnumeric(varargin{1}) % if first arg is filtered LFP
@@ -109,7 +120,7 @@ elseif isnumeric(varargin{1}) % if first arg is filtered LFP
     parse(p,varargin{:})
     lfpExtension = p.Results.lfpExtension;
     passband = p.Results.passband;
-    EMGThresh = p.Results.EMGfilt;
+    EMGThresh = p.Results.EMGThresh;
     signal = bz_Filter(double(p.Results.lfp),'filter','butter','passband',passband,'order', 3);
     timestamps = p.Results.timestamps;
     basepath = pwd;
@@ -126,6 +137,8 @@ lowThresholdFactor = p.Results.thresholds(1);
 highThresholdFactor = p.Results.thresholds(2);
 minInterRippleInterval = p.Results.durations(1);
 maxRippleDuration = p.Results.durations(2);
+minRippleDuration = p.Results.minDuration;
+plotType = p.Results.plotType;
 
 
 %% filter and calculate noise
@@ -136,11 +149,12 @@ windowLength = frequency/frequency*11;
 
 % Square and normalize signal
 squaredSignal = signal.^2;
+% squaredSignal = abs(opsignal);
 window = ones(windowLength,1)/windowLength;
 keep = [];
 if ~isempty(restrict)
     for i=1:size(restrict,1)
-        keep(timestamps>=restrict(i,1)&timestamps<=restrict(i,2)) = 1;
+        keep = InIntervals(timestamps,restrict);
     end
 end
 keep = logical(keep); 
@@ -218,18 +232,30 @@ for i=1:size(thirdPass,1)
 end
 
 % Discard ripples that are way too long
-
 ripples = [timestamps(thirdPass(:,1)) timestamps(peakPosition) ...
            timestamps(thirdPass(:,2)) peakNormalizedPower];
 duration = ripples(:,3)-ripples(:,1);
-ripples(duration>maxRippleDuration/1000,:) = [];
+ripples(duration>maxRippleDuration/1000,:) = NaN;
+%disp(['After duration test: ' num2str(size(ripples,1)) ' events.']);
+
+% Discard ripples that are too short
+ripples(duration<minRippleDuration/1000,:) = NaN;
+ripples = ripples((all((~isnan(ripples)),2)),:);
+
 disp(['After duration test: ' num2str(size(ripples,1)) ' events.']);
 
-% If a noisy channel was provided, find ripple-like events and exclude them
+% If a noise channel was provided, find ripple-like events and exclude them
 bad = [];
 if ~isempty(noise)
+    if length(noise) == 1 % you gave a channel number
+       noiselfp = bz_GetLFP(p.Results.noise,'basepath',p.Results.basepath,'basename',basename);%currently cannot take path inputs
+       squaredNoise = bz_Filter(double(noiselfp.data),'filter','butter','passband',passband,'order', 3).^2;
+    else
+            
 	% Filter, square, and pseudo-normalize (divide by signal stdev) noise
 	squaredNoise = bz_Filter(double(noise),'filter','butter','passband',passband,'order', 3).^2;
+    end
+    
 	window = ones(windowLength,1)/windowLength;
 	normalizedSquaredNoise = unity(Filter0(window,sum(squaredNoise,2)),sd,[]);
 	excluded = logical(zeros(size(ripples,1),1));
@@ -247,12 +273,13 @@ if ~isempty(noise)
 	disp(['After ripple-band noise removal: ' num2str(size(ripples,1)) ' events.']);
 end
     %% lets try to also remove EMG artifact?
-if EMG
-    sessionInfo = bz_getSessionInfo;
-    if exist([sessionInfo.FileName '.EMGFromLFP.LFP.mat'])
-        load([sessionInfo.FileName '.EMGFromLFP.LFP.mat'])
+if EMGThresh
+    sessionInfo = bz_getSessionInfo(basepath,'noprompts',true);
+    EMGfilename = fullfile(basepath,[sessionInfo.FileName '.EMGFromLFP.LFP.mat']);
+    if exist(EMGfilename)
+        load(EMGfilename)   %should use a bz_load script here
     else
-        [EMGFromLFP] = bz_EMGFromLFP(pwd,'samplingFrequency',10,'savemat',false);
+        [EMGFromLFP] = bz_EMGFromLFP(basepath,'samplingFrequency',10,'savemat',false,'noPrompts',true);
     end
     excluded = logical(zeros(size(ripples,1),1));
     for i = 1:size(ripples,1)
@@ -269,10 +296,11 @@ end
 
 % Optionally, plot results
 if strcmp(show,'on')
+  if plotType == 1
 	figure;
 	if ~isempty(noise)
 		MultiPlotXY([timestamps signal],[timestamps squaredSignal],...
-            [timestamps normalizedSquaredSignal],[timestamps noise],...
+            [timestamps normalizedSquaredSignal],[timestamps squaredNoise],...
             [timestamps squaredNoise],[timestamps normalizedSquaredNoise]);
 		nPlots = 6;
 		subplot(nPlots,1,3);
@@ -310,7 +338,33 @@ if strcmp(show,'on')
 			plot(xlim,[lowThresholdFactor lowThresholdFactor],'k','linestyle','--');
 			plot(xlim,[highThresholdFactor highThresholdFactor],'k-');
 		end
-	end
+    end
+  elseif plotType == 2
+      lfpPlot = bz_Filter(double(lfp.data),'filter','butter','passband',[50 300],'order', 3);
+     
+		plot(timestamps,lfpPlot);hold on;
+  		yLim = ylim;
+		for j=1:size(ripples,1)
+			plot([ripples(j,1) ripples(j,1)],yLim,'g-');
+			plot([ripples(j,2) ripples(j,2)],yLim,'k-');
+			plot([ripples(j,3) ripples(j,3)],yLim,'r-');
+			if i == 3
+				plot([ripples(j,1) ripples(j,3)],[ripples(j,4) ripples(j,4)],'k-');
+			end
+		end
+		for j=1:size(bad,1)
+			plot([bad(j,1) bad(j,1)],yLim,'k-');
+			plot([bad(j,2) bad(j,2)],yLim,'k-');
+			plot([bad(j,3) bad(j,3)],yLim,'k-');
+			if i == 3
+				plot([bad(j,1) bad(j,3)],[bad(j,4) bad(j,4)],'k-');
+			end
+		end
+		if mod(i,3) == 0
+			plot(xlim,[lowThresholdFactor lowThresholdFactor],'k','linestyle','--');
+			plot(xlim,[highThresholdFactor highThresholdFactor],'k-');
+		end  
+  end
 end
 
 
@@ -345,7 +399,7 @@ ripples.detectorinfo = detectorinfo;
 
 %Save
 if p.Results.saveMat
-    save([basepath filesep basename '.ripples.events.mat'],'ripples')
+    save(fullfile(basepath, [basename '.ripples.events.mat']),'ripples')
 end
 
 

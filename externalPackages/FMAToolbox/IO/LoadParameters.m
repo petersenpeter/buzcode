@@ -1,4 +1,4 @@
-function parameters = LoadParameters(filename)
+function [parameters] = LoadParameters(filename)
 
 %LoadParameters - Load parameters from an XML file.
 %
@@ -55,6 +55,13 @@ if isempty(pathname)
 end
 
 t = xmltree(filename);
+
+paths = which('convert','-ALL');
+for i = 1:length(paths) % we need to find the right version of convert.m (2018a bugfix)
+    if ~isempty(strfind(paths{i},'buzcode'))
+       addpath(paths{i},'-begin') % bump buzcode/XML/convert to the top of the search path
+    end
+end
 p = convert(t);
 % parameters = p;
 
@@ -106,12 +113,12 @@ if ~isempty(p.spikeDetection),
         warning('something went wrong loading spikeGroups from XML')
         parameters.spikeGroups.nSamples = [];
         parameters.spikeGroups.groups = {};
-        parameters.spikeGroups.nGroups = length(p.anatomicalDescription.channelGroups);
+        parameters.spikeGroups.nGroups = 0;
     end
 else
 	parameters.spikeGroups.nSamples = [];
 	parameters.spikeGroups.groups = {};
-	parameters.spikeGroups.nGroups = length(p.anatomicalDescription.channelGroups);
+	parameters.spikeGroups.nGroups = 0;
 end
 
 parameters.nChannels = str2num(p.acquisitionSystem.nChannels);
@@ -119,7 +126,23 @@ parameters.nChannels = str2num(p.acquisitionSystem.nChannels);
 %In the future, should think about this...
 parameters.channels = [0:parameters.nChannels-1]; 
 parameters.nBits = str2num(p.acquisitionSystem.nBits);
-parameters.rates.lfp = str2num(p.fieldPotentials.lfpSamplingRate);
+
+% Use manually-entered LFP sample rate if user entered it in Neuroscope
+manuallfpsamprate = 0;
+if isfield(p,'files')
+    if isfield(p.files,'file')
+        if isfield(p.files.file,'extension')
+            if strcmp(p.files.file.extension,'lfp')
+                manuallfpsamprate = 1;
+            end
+        end
+    end
+end
+if manuallfpsamprate
+    parameters.rates.lfp = str2num(p.files.file.samplingRate);
+else
+    parameters.rates.lfp = str2num(p.fieldPotentials.lfpSamplingRate);
+end            
 parameters.rates.wideband = str2num(p.acquisitionSystem.samplingRate);
 try
 	parameters.rates.video = str2num(p.video.samplingRate);
@@ -139,15 +162,15 @@ parameters.SampleTime = (1/str2num(p.acquisitionSystem.samplingRate)) * 1e+6; % 
 parameters.nElecGps = length(p.anatomicalDescription.channelGroups.group);
 parameters.ElecGp = p.anatomicalDescription.channelGroups.group;
 parameters.HiPassFreq = 500; % default hi-pass for klusta-3.0 w/ intan data
-parameters.lfpSampleRate = str2num(p.fieldPotentials.lfpSamplingRate);
+parameters.lfpSampleRate = parameters.rates.lfp;
 
 % for backwards compatibility with loadXml_old.m and variants
 % the below code fails with certain XMl files people in the lab use
 % so we'll wrap this in a try/catch for now..
 try
-parameters.VoltageRange = str2num(p.acquisitionSystem.voltageRange);
-parameters.Amplification = str2num(p.acquisitionSystem.amplification);
-parameters.Offset = str2num(p.acquisitionSystem.offset);
+    parameters.VoltageRange = str2num(p.acquisitionSystem.voltageRange);
+    parameters.Amplification = str2num(p.acquisitionSystem.amplification);
+    parameters.Offset = str2num(p.acquisitionSystem.offset);
 catch
      warning('could not load .Amplification, something may be wrong with your xml...') 
 end
@@ -172,7 +195,7 @@ try
                     parameters.AnatGrps(a).Channels(b) = str2num(p.anatomicalDescription.channelGroups.group{a}.channel{b});
                 end 
             elseif isvector(p.anatomicalDescription.channelGroups.group{a}.channel)
-                parameters.AnatGrps(a).Channels = p.anatomicalDescription.channelGroups.group{a}.channel;
+                parameters.AnatGrps(a).Channels = str2num(p.anatomicalDescription.channelGroups.group{a}.channel);
             else
                 warning('Anatomy Groups seems to have an issue, eh?..') 
             end
