@@ -53,9 +53,9 @@ function mono_res = bz_MonoSynConvClick (spikeIDs,spiketimes,varargin)
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-%get experimentally validated probabilities
-
-
+%get experimentally validated probabilities:
+% mono_res.FalsePositive
+% mono_res.TruePositive
 fil = which('bz_MonoSynConvClick');
 if ispc
     sl = regexp(fil,'\');
