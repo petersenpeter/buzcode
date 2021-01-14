@@ -15,9 +15,15 @@ function [phaseMaps] = bz_phaseMap1D(varargin)
 %
 %
 % OUTPUT
-%  phaseMap - 7xM matrix columns are linearized position, trial
-%  number, x position, y position, instananeous firing rate, theta phase.  M is the number of spikes
-%  across all trials of the same type
+%  phaseMap - 7xM matrix columns are 
+%           1. linearized position, 
+%           2. trial number, 
+%           3. x position, 
+%           4. y position, 
+%           5. instananeous firing rate, 
+%           6. theta phase. 
+%           
+%           M is the number of spikes across all trials of the same type
 %
 %
 %

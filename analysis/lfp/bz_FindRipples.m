@@ -81,7 +81,8 @@ addParameter(p,'durations',[30 100],@isnumeric)
 addParameter(p,'restrict',[],@isnumeric)
 addParameter(p,'stdev',[],@isnumeric)
 addParameter(p,'noise',[],@ismatrix)
-addParameter(p,'saveMat',false,@islogical);
+addParameter(p,'saveMat',true,@islogical);
+addParameter(p,'passband',[130 200],@isnumeric);
 
 if isstr(varargin{1})  % if first arg is basepath
     addRequired(p,'basepath',@isstr)
@@ -89,7 +90,7 @@ if isstr(varargin{1})  % if first arg is basepath
     parse(p,varargin{:})
     basename = bz_BasenameFromBasepath(p.Results.basepath);
     lfp = bz_GetLFP(p.Results.channel,'basepath',p.Results.basepath,'basename',basename);%currently cannot take path inputs
-    signal = bz_FilterLFP(double(lfp.data),'passband',[130 200]);
+    signal = bz_FilterLFP(double(lfp.data),'passband',p.Results.passband);
     timestamps = lfp.timestamps;
 elseif isnumeric(varargin{1}) % if first arg is filtered LFP
     addRequired(p,'lfp',@isnumeric)
@@ -307,7 +308,7 @@ end
 
 
 if p.Results.saveMat
-    save([p.Results.basepath filesep basename '.ripples.event.mat'],'ripples')
+    save([p.Results.basepath filesep basename '.ripples.events.mat'],'ripples')
 end
 
 

@@ -54,8 +54,6 @@ saveMat = p.Results.saveMat;
 
 
 %% set up data format and popinfo struct that will be returned
-
-
 positionDecodingMaxCorr.UID = spikes.UID;
 positionDecodingMaxCorr.region = spikes.region;
 positionDecodingMaxCorr.sessionName = spikes.sessionName; % session name
